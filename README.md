@@ -36,9 +36,10 @@ Without Traefik, you would need to manually configure SSL certificates and routi
     ```bash
     cd docker-config-deepseek_api_proxy
     ```
-3. Configure your domain in the `.env` file:
+3. Configure your domain in the `.env` file from the `.env.example`, and change it accordingly, especially:
     ```bash
-    DOMAIN=your-domain.com
+    DOMAIN=your-domain.com # To point to the domain handled by your Treafik
+    DEEPSEEK_API_KEY=sk-1234 # To push your key to DeepSeek
     ```
 4. Run `docker-compose up -d` to start the service.
 
