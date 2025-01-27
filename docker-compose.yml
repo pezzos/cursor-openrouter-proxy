@@ -1,0 +1,26 @@
+networks:
+  proxy:
+    external: true
+
+services:
+  cursor-deepseek:
+    build: .
+    container_name: cursor-deepseek
+    env_file: .env
+    environment:
+      - TZ=${TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      # - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    networks:
+      - proxy
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=proxy
+      - traefik.http.routers.cursor-deepseek.entrypoints=websecure
+      - traefik.http.routers.cursor-deepseek.rule=Host(`cursor-deepseek.${DOMAIN}`)
+      - traefik.http.services.cursor-deepseek.loadbalancer.server.port=9000
+      - traefik.http.routers.cursor-deepseek.tls=true
+      - traefik.http.routers.cursor-deepseek.tls.certresolver=myresolver
