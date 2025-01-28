@@ -10,6 +10,9 @@ WORKDIR /app
 # Use ARG to get environment variables during build
 ARG GIT
 
+# Add build argument to force rebuild to avoid cache for the git clone
+ARG BUILD_DATE
+
 # Clone the repository using GIT variable
 RUN git clone ${GIT:-https://github.com/danilofalcao/cursor-deepseek.git} . && \
     rm -rf .git

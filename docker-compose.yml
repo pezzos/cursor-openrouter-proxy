@@ -9,6 +9,7 @@ services:
       args:
         - MODEL=${MODEL}
         - GIT=${GIT}
+        - BUILD_DATE=${BUILD_DATE:-$(date +%Y%m%d_%H%M%S)}
     container_name: cursor-deepseek
     env_file: .env
     environment:
