@@ -4,7 +4,11 @@ networks:
 
 services:
   cursor-deepseek:
-    build: .
+    build:
+      context: .
+      args:
+        - MODEL=${MODEL}
+        - GIT=${GIT}
     container_name: cursor-deepseek
     env_file: .env
     environment:
@@ -12,6 +16,7 @@ services:
       - PUID=${PUID}
       - PGID=${PGID}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - MODEL=${MODEL}
       # - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
     networks:
       - proxy

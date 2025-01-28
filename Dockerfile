@@ -7,10 +7,12 @@ RUN apk add --no-cache git
 # Set working directory
 WORKDIR /app
 
-# Clone the repository
-RUN git clone https://github.com/danilofalcao/cursor-deepseek.git . && \
-    rm -rf .git && \
-    rm proxy-openrouter.go  # Supprime le fichier qui cause le conflit
+# Use ARG to get environment variables during build
+ARG GIT
+
+# Clone the repository using GIT variable
+RUN git clone ${GIT:-https://github.com/danilofalcao/cursor-deepseek.git} . && \
+    rm -rf .git
 
 # Download dependencies
 RUN go mod download
@@ -36,5 +38,9 @@ COPY .env .
 # Expose port 9000
 EXPOSE 9000
 
-# Run the application
-CMD ["./proxy"]
+# Use ARG and ENV to pass MODEL to runtime
+ARG MODEL
+ENV MODEL=${MODEL:-coder}
+
+# Run the application with the MODEL environment variable
+CMD ["sh", "-c", "./proxy -model ${MODEL}"]
