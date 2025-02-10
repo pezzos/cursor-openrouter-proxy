@@ -3,30 +3,24 @@ networks:
     external: true
 
 services:
-  cursor-deepseek:
+  cursor-proxy:
     build:
       context: .
-      args:
-        - MODEL=${MODEL}
-        - GIT=${GIT}
-        - BUILD_DATE=${BUILD_DATE:-$(date +%Y%m%d_%H%M%S)}
-    container_name: cursor-deepseek
+    container_name: cursor-proxy
     env_file: .env
     environment:
       - TZ=${TZ}
       - PUID=${PUID}
       - PGID=${PGID}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-      - MODEL=${MODEL}
-      # - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
     networks:
       - proxy
     restart: unless-stopped
     labels:
       - traefik.enable=true
       - traefik.docker.network=proxy
-      - traefik.http.routers.cursor-deepseek.entrypoints=websecure
-      - traefik.http.routers.cursor-deepseek.rule=Host(`cursor-deepseek.${DOMAIN}`)
-      - traefik.http.services.cursor-deepseek.loadbalancer.server.port=9000
-      - traefik.http.routers.cursor-deepseek.tls=true
-      - traefik.http.routers.cursor-deepseek.tls.certresolver=myresolver
+      - traefik.http.routers.cursor-proxy.entrypoints=websecure
+      - traefik.http.routers.cursor-proxy.rule=Host(`cursor-proxy.${DOMAIN}`)
+      - traefik.http.services.cursor-proxy.loadbalancer.server.port=9000
+      - traefik.http.routers.cursor-proxy.tls=true
+      - traefik.http.routers.cursor-proxy.tls.certresolver=myresolver
