@@ -3,7 +3,11 @@
 # test_proxy.sh
 echo "Testing Cursor Proxy..."
 
-response=$(curl -s -w "\n%{http_code}" https://cursor-proxy.home.pezzos.com/v1/chat/completions \
+# Load the domain from the .env file
+DOMAIN=$(grep -oP 'DOMAIN=\K.*' .env)
+
+# Use a fake API key because it's rewritten by the proxy
+response=$(curl -s -w "\n%{http_code}" https://cursor-proxy.$DOMAIN/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-or-v1-1234567890" \
   -d '{
