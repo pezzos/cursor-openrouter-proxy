@@ -19,9 +19,9 @@ import (
 )
 
 const (
-	openRouterEndpoint      = "https://openrouter.ai/api/v1"
-	openRouterModel         = "deepseek/deepseek-chat"
-	gpt4oModel              = "gpt-4o"
+	openRouterEndpoint = "https://openrouter.ai/api/v1"
+	openRouterModel    = "openai/gpt-4o"
+	gpt4oModel        = "openai/gpt-4o"
 )
 
 var (
@@ -108,7 +108,7 @@ func init() {
 		apiKey:   openRouterAPIKey,
 	}
 
-	log.Printf("Initialized with model: %s using endpoint: %s", activeConfig.model, activeConfig.endpoint)
+	log.Printf("Initialized Cursor-OpenRouter proxy with model: %s using endpoint: %s", activeConfig.model, activeConfig.endpoint)
 }
 
 // Models response structure
@@ -235,8 +235,8 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-// DeepSeek request structure
-type DeepSeekRequest struct {
+// Convert to OpenRouter request format
+type OpenRouterRequest struct {
 	Model       string    `json:"model"`
 	Messages    []Message `json:"messages"`
 	Stream      bool      `json:"stream"`
@@ -370,28 +370,28 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert to DeepSeek request format
-	deepseekReq := DeepSeekRequest{
-		Model:    activeConfig.model, // Ensure we use the configured model
+	// Convert to OpenRouter request format
+	openRouterReq := OpenRouterRequest{
+		Model:    activeConfig.model,
 		Messages: convertMessages(chatReq.Messages),
 		Stream:   chatReq.Stream,
 	}
 
-	log.Printf("Creating DeepSeek request with model: %s at endpoint: %s", deepseekReq.Model, activeConfig.endpoint)
+	log.Printf("Creating OpenRouter request with model: %s at endpoint: %s", openRouterReq.Model, activeConfig.endpoint)
 
 	// Copy optional parameters if present
 	if chatReq.Temperature != nil {
-		deepseekReq.Temperature = *chatReq.Temperature
+		openRouterReq.Temperature = *chatReq.Temperature
 	}
 	if chatReq.MaxTokens != nil {
-		deepseekReq.MaxTokens = *chatReq.MaxTokens
+		openRouterReq.MaxTokens = *chatReq.MaxTokens
 	}
 
 	// Handle tools/functions
 	if len(chatReq.Tools) > 0 {
-		deepseekReq.Tools = chatReq.Tools
+		openRouterReq.Tools = chatReq.Tools
 		if tc := convertToolChoice(chatReq.ToolChoice); tc != "" {
-			deepseekReq.ToolChoice = tc
+			openRouterReq.ToolChoice = tc
 		}
 	} else if len(chatReq.Functions) > 0 {
 		// Convert functions to tools format
@@ -402,16 +402,16 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 				Function: fn,
 			}
 		}
-		deepseekReq.Tools = tools
+		openRouterReq.Tools = tools
 
 		// Convert tool_choice if present
 		if tc := convertToolChoice(chatReq.ToolChoice); tc != "" {
-			deepseekReq.ToolChoice = tc
+			openRouterReq.ToolChoice = tc
 		}
 	}
 
 	// Create new request body
-	modifiedBody, err := json.Marshal(deepseekReq)
+	modifiedBody, err := json.Marshal(openRouterReq)
 	if err != nil {
 		log.Printf("Error creating modified request body: %v", err)
 		http.Error(w, "Error creating modified request", http.StatusInternalServerError)
@@ -420,7 +420,7 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Modified request body: %s", string(modifiedBody))
 
-	// Create the proxy request to DeepSeek
+	// Create the proxy request to OpenRouter
 	targetURL := activeConfig.endpoint
 	if !strings.HasSuffix(targetURL, "/") {
 		targetURL += "/"
@@ -442,13 +442,13 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	// Copy headers
 	copyHeaders(proxyReq.Header, r.Header)
 
-	// Set DeepSeek API key and content type
+	// Set OpenRouter API key and content type
 	proxyReq.Header.Set("Authorization", "Bearer "+activeConfig.apiKey)
 	proxyReq.Header.Set("Content-Type", "application/json")
 
 	// Always add OpenRouter-specific headers
 	proxyReq.Header.Set("HTTP-Referer", "https://cursor-proxy.home.pezzos.com")
-	proxyReq.Header.Set("X-Title", "Pezzos Cursor DeepSeek Proxy")
+	proxyReq.Header.Set("X-Title", "Cursor Proxy")
 
 	if chatReq.Stream {
 		proxyReq.Header.Set("Accept", "text/event-stream")
@@ -470,8 +470,8 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	log.Printf("DeepSeek response status: %d", resp.StatusCode)
-	log.Printf("DeepSeek response headers: %v", resp.Header)
+	log.Printf("OpenRouter response status: %d", resp.StatusCode)
+	log.Printf("OpenRouter response headers: %v", resp.Header)
 
 	// Handle error responses
 	if resp.StatusCode >= 400 {
@@ -612,8 +612,8 @@ func handleRegularResponse(w http.ResponseWriter, resp *http.Response) {
 
 	debugLog("Original response body: %s", string(body))
 
-	// Parse the DeepSeek response
-	var deepseekResp struct {
+	// Parse the OpenRouter response
+	var openRouterResp struct {
 		ID      string `json:"id"`
 		Object  string `json:"object"`
 		Created int64  `json:"created"`
@@ -630,8 +630,8 @@ func handleRegularResponse(w http.ResponseWriter, resp *http.Response) {
 		} `json:"usage"`
 	}
 
-	if err := json.Unmarshal(body, &deepseekResp); err != nil {
-		debugLog("Error parsing DeepSeek response: %v", err)
+	if err := json.Unmarshal(body, &openRouterResp); err != nil {
+		debugLog("Error parsing OpenRouter response: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -653,20 +653,20 @@ func handleRegularResponse(w http.ResponseWriter, resp *http.Response) {
 			TotalTokens      int `json:"total_tokens"`
 		} `json:"usage"`
 	}{
-		ID:      deepseekResp.ID,
+		ID:      openRouterResp.ID,
 		Object:  "chat.completion",
-		Created: deepseekResp.Created,
+		Created: openRouterResp.Created,
 		Model:   gpt4oModel,
-		Usage:   deepseekResp.Usage,
+		Usage:   openRouterResp.Usage,
 	}
 
 	openAIResp.Choices = make([]struct {
 		Index        int     `json:"index"`
 		Message      Message `json:"message"`
 		FinishReason string  `json:"finish_reason"`
-	}, len(deepseekResp.Choices))
+	}, len(openRouterResp.Choices))
 
-	for i, choice := range deepseekResp.Choices {
+	for i, choice := range openRouterResp.Choices {
 		openAIResp.Choices[i] = struct {
 			Index        int     `json:"index"`
 			Message      Message `json:"message"`
