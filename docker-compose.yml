@@ -13,6 +13,9 @@ services:
       - PUID=${PUID}
       - PGID=${PGID}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     networks:
       - proxy
     restart: unless-stopped

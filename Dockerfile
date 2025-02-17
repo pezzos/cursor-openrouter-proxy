@@ -7,9 +7,6 @@ WORKDIR /app
 # Copy source code
 COPY . .
 
-# Download dependencies
-RUN go mod download
-
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -o proxy proxy.go
 

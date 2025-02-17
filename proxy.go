@@ -16,12 +16,14 @@ import (
 
 	"github.com/joho/godotenv"
 	"golang.org/x/net/http2"
+	"github.com/klauspost/compress/gzip"
+	"github.com/andybalholm/brotli"
 )
 
 const (
 	openRouterEndpoint = "https://openrouter.ai/api/v1"
 	openRouterModel    = "openai/gpt-4o"
-	gpt4oModel        = "openai/gpt-4o"
+	cursorMockedModel        = "gpt-4o"
 )
 
 var (
@@ -96,15 +98,27 @@ func init() {
 	// Get API key
 	openRouterAPIKey = os.Getenv("OPENROUTER_API_KEY")
 
-	// Ensure API key is provided
-	if openRouterAPIKey == "" {
-		log.Fatal("OPENROUTER_API_KEY environment variable is required")
+	// Ensure API key is provided and has correct format
+	if !strings.HasPrefix(openRouterAPIKey, "sk-or-") {
+		log.Fatal("OPENROUTER_API_KEY must start with 'sk-or-'")
+	}
+	if len(openRouterAPIKey) < 32 {
+		log.Fatal("OPENROUTER_API_KEY seems too short to be valid")
+	}
+
+	// Get default model from env or use fallback
+	defaultModel := os.Getenv("MODEL")
+	if defaultModel == "" {
+		defaultModel = openRouterModel
+	} else if !strings.Contains(defaultModel, "/") {
+		// If model doesn't contain a provider prefix, fails
+		log.Fatalf("Invalid model: %s. Must contain a provider prefix (e.g. openai/gpt-4o)", defaultModel)
 	}
 
 	// Configure the active endpoint and model
 	activeConfig = Config{
 		endpoint: openRouterEndpoint,
-		model:    openRouterModel,
+		model:    defaultModel,
 		apiKey:   openRouterAPIKey,
 	}
 
@@ -255,6 +269,44 @@ func debugLog(format string, args ...interface{}) {
 func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile)
 
+	// Add health check endpoint
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		// Test OpenRouter connection
+		req, err := http.NewRequest("GET", openRouterEndpoint+"/models", nil)
+		if err != nil {
+			log.Printf("Error creating health check request: %v", err)
+			http.Error(w, "Error creating request", http.StatusInternalServerError)
+			return
+		}
+
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", activeConfig.apiKey))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("HTTP-Referer", "https://github.com/pezzos/cursor-proxy")
+		req.Header.Set("X-Title", "Cursor Proxy")
+		req.Header.Set("OpenAI-Organization", "cursor-proxy")
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			log.Printf("Health check failed: %v", err)
+			http.Error(w, "Connection failed", http.StatusServiceUnavailable)
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			log.Printf("Health check failed with status %d: %s", resp.StatusCode, string(body))
+			http.Error(w, fmt.Sprintf("OpenRouter returned %d", resp.StatusCode), resp.StatusCode)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":   "ok",
+			"endpoint": openRouterEndpoint,
+		})
+	})
+
 	server := &http.Server{
 		Addr:    ":9000",
 		Handler: http.HandlerFunc(proxyHandler),
@@ -277,6 +329,13 @@ func enableCors(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Credentials", "true")
 }
 
+func maskAPIKey(key string) string {
+	if len(key) <= 12 {
+		return "***"
+	}
+	return key[:6] + "..." + key[len(key)-6:]
+}
+
 func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	debugLog("Received request: %s %s", r.Method, r.URL.Path)
 
@@ -286,6 +345,31 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	enableCors(w)
+
+	// Handle /v1/config endpoint for GET
+	if r.URL.Path == "/v1/config" && r.Method == "GET" {
+		handleGetConfigRequest(w, r)
+		return
+	}
+
+	// Handle /v1/models endpoint
+	if r.URL.Path == "/v1/models" && r.Method == "GET" {
+		handleGetModelsRequest(w)
+		return
+	}
+
+	// Handle /v1/config endpoint for POST
+	if r.URL.Path == "/v1/config" && r.Method == "POST" {
+		handleConfigRequest(w, r)
+		return
+	}
+
+	// Only handle API requests with /v1/ prefix
+	if !strings.HasPrefix(r.URL.Path, "/v1/") {
+		log.Printf("Invalid path: %s", r.URL.Path)
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
 
 	// Validate API key
 	authHeader := r.Header.Get("Authorization")
@@ -302,16 +386,6 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid API key format", http.StatusUnauthorized)
 		return
 	}
-
-	// Handle /v1/models endpoint
-	if r.URL.Path == "/v1/models" && r.Method == "GET" {
-		log.Printf("Handling /v1/models request")
-		handleModelsRequest(w)
-		return
-	}
-
-	// Log headers for debugging
-	debugLog("Request headers: %+v", r.Header)
 
 	// Read and log request body for debugging
 	var chatReq ChatRequest
@@ -332,59 +406,52 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Parsed request: %+v", chatReq)
 
-	// Handle models endpoint
-	if r.URL.Path == "/v1/models" {
-		handleModelsRequest(w)
-		return
-	}
-
-	// Only handle API requests with /v1/ prefix
-	if !strings.HasPrefix(r.URL.Path, "/v1/") {
-		log.Printf("Invalid path: %s", r.URL.Path)
-		http.Error(w, "Not found", http.StatusNotFound)
-		return
-	}
-
-	// Restore the body for further reading
-	r.Body = io.NopCloser(bytes.NewBuffer(body))
-
-	log.Printf("Request body: %s", string(body))
-
-	// Parse the request to check for streaming - reuse existing chatReq
-	if err := json.Unmarshal(body, &chatReq); err != nil {
-		log.Printf("Error parsing request JSON: %v", err)
-		http.Error(w, "Error parsing request", http.StatusBadRequest)
-		return
-	}
-
-	log.Printf("Requested model: %s", chatReq.Model)
-
-	// Replace gpt-4o model with the appropriate deepseek model
-	if chatReq.Model == gpt4oModel {
+	// Replace gpt-4o model with the appropriate model
+	if chatReq.Model == cursorMockedModel {
 		log.Printf("Converting gpt-4o to configured model: %s (endpoint: %s)", activeConfig.model, activeConfig.endpoint)
 		chatReq.Model = activeConfig.model
 		log.Printf("Model converted to: %s", activeConfig.model)
 	} else {
 		log.Printf("Unsupported model requested: %s", chatReq.Model)
-		http.Error(w, fmt.Sprintf("Model %s not supported. Use %s instead.", chatReq.Model, gpt4oModel), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("Model %s not supported. Use %s instead.", chatReq.Model, cursorMockedModel), http.StatusBadRequest)
 		return
 	}
 
-	// Convert to OpenRouter request format
+	// Convert to OpenRouter request format with model-specific adjustments
 	openRouterReq := OpenRouterRequest{
 		Model:    activeConfig.model,
 		Messages: convertMessages(chatReq.Messages),
 		Stream:   chatReq.Stream,
 	}
 
-	log.Printf("Creating OpenRouter request with model: %s at endpoint: %s", openRouterReq.Model, activeConfig.endpoint)
-
-	// Copy optional parameters if present
-	if chatReq.Temperature != nil {
-		openRouterReq.Temperature = *chatReq.Temperature
-	}
-	if chatReq.MaxTokens != nil {
-		openRouterReq.MaxTokens = *chatReq.MaxTokens
+	// Model-specific adjustments
+	switch {
+	case strings.HasPrefix(activeConfig.model, "mistralai/"):
+		if chatReq.Temperature != nil {
+			temp := *chatReq.Temperature
+			if temp > 1.0 {
+				temp = 1.0
+			}
+			openRouterReq.Temperature = temp
+		}
+	case strings.HasPrefix(activeConfig.model, "google/"):
+		if chatReq.Temperature != nil {
+			temp := *chatReq.Temperature
+			if temp > 1.0 {
+				temp = 1.0
+			}
+			openRouterReq.Temperature = temp
+		}
+		if chatReq.MaxTokens != nil {
+			openRouterReq.MaxTokens = *chatReq.MaxTokens
+		}
+	default:
+		if chatReq.Temperature != nil {
+			openRouterReq.Temperature = *chatReq.Temperature
+		}
+		if chatReq.MaxTokens != nil {
+			openRouterReq.MaxTokens = *chatReq.MaxTokens
+		}
 	}
 
 	// Handle tools/functions
@@ -394,7 +461,6 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 			openRouterReq.ToolChoice = tc
 		}
 	} else if len(chatReq.Functions) > 0 {
-		// Convert functions to tools format
 		tools := make([]Tool, len(chatReq.Functions))
 		for i, fn := range chatReq.Functions {
 			tools[i] = Tool{
@@ -403,8 +469,6 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		openRouterReq.Tools = tools
-
-		// Convert tool_choice if present
 		if tc := convertToolChoice(chatReq.ToolChoice); tc != "" {
 			openRouterReq.ToolChoice = tc
 		}
@@ -430,8 +494,6 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 		targetURL += "?" + r.URL.RawQuery
 	}
 
-	log.Printf("Using endpoint %s with model %s", activeConfig.endpoint, activeConfig.model)
-	log.Printf("Forwarding to: %s", targetURL)
 	proxyReq, err := http.NewRequest(r.Method, targetURL, bytes.NewReader(modifiedBody))
 	if err != nil {
 		log.Printf("Error creating proxy request: %v", err)
@@ -439,29 +501,35 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Copy headers
-	copyHeaders(proxyReq.Header, r.Header)
-
-	// Set OpenRouter API key and content type
-	proxyReq.Header.Set("Authorization", "Bearer "+activeConfig.apiKey)
+	// Set common headers
+	proxyReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", activeConfig.apiKey))
 	proxyReq.Header.Set("Content-Type", "application/json")
-
-	// Always add OpenRouter-specific headers
-	proxyReq.Header.Set("HTTP-Referer", "https://cursor-proxy.home.pezzos.com")
+	proxyReq.Header.Set("Accept", "application/json")
+	proxyReq.Header.Set("User-Agent", "cursor-proxy/1.0")
+	proxyReq.Header.Set("HTTP-Referer", "https://github.com/pezzos/cursor-proxy")
 	proxyReq.Header.Set("X-Title", "Cursor Proxy")
+	proxyReq.Header.Set("OpenAI-Organization", "cursor-proxy")
+
+	// Model-specific headers
+	switch {
+	case strings.HasPrefix(activeConfig.model, "mistralai/"):
+		proxyReq.Header.Set("X-Model-Provider", "mistral")
+	case strings.HasPrefix(activeConfig.model, "google/"):
+		proxyReq.Header.Set("X-Model-Provider", "google")
+	}
+
+	// Remove problematic headers
+	proxyReq.Header.Del("X-Forwarded-For")
+	proxyReq.Header.Del("X-Forwarded-Host")
+	proxyReq.Header.Del("X-Forwarded-Port")
+	proxyReq.Header.Del("X-Forwarded-Proto")
+	proxyReq.Header.Del("X-Forwarded-Server")
+	proxyReq.Header.Del("X-Real-Ip")
 
 	if chatReq.Stream {
 		proxyReq.Header.Set("Accept", "text/event-stream")
 	}
 
-	// Add Accept-Language header from request
-	if acceptLanguage := r.Header.Get("Accept-Language"); acceptLanguage != "" {
-		proxyReq.Header.Set("Accept-Language", acceptLanguage)
-	}
-
-	log.Printf("Proxy request headers: %v", proxyReq.Header)
-
-	// Use the global client instead of creating a new one
 	resp, err := httpClient.Do(proxyReq)
 	if err != nil {
 		log.Printf("Error forwarding request: %v", err)
@@ -473,39 +541,44 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("OpenRouter response status: %d", resp.StatusCode)
 	log.Printf("OpenRouter response headers: %v", resp.Header)
 
-	// Handle error responses
+	// Handle error responses with better error handling
 	if resp.StatusCode >= 400 {
-		respBody, err := io.ReadAll(resp.Body)
+		respBody, err := readResponse(resp)
 		if err != nil {
 			log.Printf("Error reading error response: %v", err)
 			http.Error(w, "Error reading response", http.StatusInternalServerError)
 			return
 		}
-		log.Printf("OpenRouter error response: %s", string(respBody))
 
-		// Parse OpenRouter error format
+		log.Printf("Error response body: %s", string(respBody))
+
+		// Try to parse the error response
 		var openRouterErr struct {
 			Error struct {
-				Code     int                    `json:"code"`
-				Message  string                 `json:"message"`
-				Metadata map[string]interface{} `json:"metadata,omitempty"`
+				Message string `json:"message"`
+				Type    string `json:"type"`
+				Code    int    `json:"code"`
 			} `json:"error"`
 		}
+
 		if err := json.Unmarshal(respBody, &openRouterErr); err != nil {
-			// If not in OpenRouter format, forward as is
-			for k, v := range resp.Header {
-				w.Header()[k] = v
-			}
+			// If we can't parse the error, return the raw response
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(resp.StatusCode)
 			w.Write(respBody)
 			return
 		}
 
-		// Forward OpenRouter error with proper status code
+		// Return a properly formatted error response
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(openRouterErr.Error.Code)
-		json.NewEncoder(w).Encode(openRouterErr)
+		w.WriteHeader(resp.StatusCode)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": map[string]interface{}{
+				"message": openRouterErr.Error.Message,
+				"type":    openRouterErr.Error.Type,
+				"code":    openRouterErr.Error.Code,
+			},
+		})
 		return
 	}
 
@@ -628,11 +701,24 @@ func handleRegularResponse(w http.ResponseWriter, resp *http.Response) {
 			CompletionTokens int `json:"completion_tokens"`
 			TotalTokens      int `json:"total_tokens"`
 		} `json:"usage"`
+		Error *struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+			Code    int    `json:"code"`
+		} `json:"error,omitempty"`
 	}
 
 	if err := json.Unmarshal(body, &openRouterResp); err != nil {
 		debugLog("Error parsing OpenRouter response: %v", err)
-		w.WriteHeader(http.StatusInternalServerError)
+		debugLog("Response body that failed to parse: %s", string(body))
+		http.Error(w, fmt.Sprintf("Error parsing response: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Check for OpenRouter error
+	if openRouterResp.Error != nil {
+		debugLog("OpenRouter returned error: %+v", openRouterResp.Error)
+		http.Error(w, openRouterResp.Error.Message, openRouterResp.Error.Code)
 		return
 	}
 
@@ -656,7 +742,7 @@ func handleRegularResponse(w http.ResponseWriter, resp *http.Response) {
 		ID:      openRouterResp.ID,
 		Object:  "chat.completion",
 		Created: openRouterResp.Created,
-		Model:   gpt4oModel,
+		Model:   cursorMockedModel,
 		Usage:   openRouterResp.Usage,
 	}
 
@@ -693,7 +779,7 @@ func handleRegularResponse(w http.ResponseWriter, resp *http.Response) {
 	modifiedBody, err := json.Marshal(openAIResp)
 	if err != nil {
 		debugLog("Error creating modified response: %v", err)
-		w.WriteHeader(http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Error creating response: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -748,13 +834,93 @@ func handleModelsRequest(w http.ResponseWriter) {
 }
 
 func readResponse(resp *http.Response) ([]byte, error) {
+	var reader io.Reader = resp.Body
+	contentEncoding := resp.Header.Get("Content-Encoding")
+	log.Printf("Response Content-Encoding: %s", contentEncoding)
+
+	switch contentEncoding {
+	case "gzip":
+		gzipReader, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("error creating gzip reader: %v", err)
+		}
+		defer gzipReader.Close()
+		reader = gzipReader
+		log.Printf("Using gzip decompression")
+	case "br":
+		reader = brotli.NewReader(resp.Body)
+		log.Printf("Using brotli decompression")
+	default:
+		log.Printf("No compression detected")
+	}
+
 	buf := getBuffer(int(resp.ContentLength))
 	defer putBuffer(buf)
 
-	_, err := io.Copy(buf, resp.Body)
+	n, err := io.Copy(buf, reader)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error reading response: %v", err)
 	}
+	log.Printf("Read %d bytes from response", n)
 
 	return buf.Bytes(), nil
+}
+
+func handleConfigRequest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var config struct {
+		Model string `json:"model"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if config.Model == "" {
+		http.Error(w, "Model is required", http.StatusBadRequest)
+		return
+	}
+
+	activeConfig.model = config.Model
+	log.Printf("Updated model to: %s", activeConfig.model)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status": "success",
+		"model":  activeConfig.model,
+	})
+}
+
+func handleGetConfigRequest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"model": activeConfig.model,
+	})
+}
+
+func handleGetModelsRequest(w http.ResponseWriter) {
+	resp, err := httpClient.Get(openRouterEndpoint + "/models")
+	if err != nil {
+		http.Error(w, "Error fetching models", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		http.Error(w, "Failed to fetch models", resp.StatusCode)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	io.Copy(w, resp.Body)
 }
