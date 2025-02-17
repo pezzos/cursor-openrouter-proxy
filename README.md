@@ -1,121 +1,104 @@
-# DeepSeek API Proxy
+# Cursor OpenRouter Proxy
 
-A high-performance HTTP/2-enabled proxy server designed specifically to enable Cursor IDE's Composer to use DeepSeek's and OpenRouter's language models. This proxy translates OpenAI-compatible API requests to DeepSeek/OpenRouter API format, allowing Cursor's Composer and other OpenAI API-compatible tools to seamlessly work with these models.
+A high-performance HTTP/2-enabled proxy server that enables Cursor IDE (including Composer) to use any LLM available through OpenRouter. By making Cursor believe it's talking to GPT-4, this proxy translates OpenAI-compatible API requests to work with any model available on OpenRouter, allowing seamless integration with Cursor's features.
 
 ## Primary Use Case
 
-This proxy was created to enable Cursor IDE users to leverage DeepSeek's and OpenRouter's powerful language models through Cursor's Composer interface as an alternative to OpenAI's models. By running this proxy locally, you can configure Cursor's Composer to use these models for AI assistance, code generation, and other AI features. It handles all the necessary request/response translations and format conversions to make the integration seamless.
+This proxy enables Cursor IDE users to leverage any LLM available on OpenRouter through Cursor's interface, including the Composer. Simply point Cursor to this proxy with any key, and it will handle all the necessary translations to make your chosen model work as if it were GPT-4.
 
 ## Features
 
+- Dynamic model switching via API endpoint without container reload
 - HTTP/2 support for improved performance
 - Full CORS support
 - Streaming responses
 - Support for function calling/tools
 - Automatic message format conversion
 - Compatible with OpenAI API client libraries
-- API key validation for secure access
-- Support for both DeepSeek and OpenRouter endpoints
+- API key validation
+- Traefik integration ready
 - Docker container support
 
 ## Prerequisites
 
 - Cursor Pro Subscription
-- Go 1.19 or higher
-- DeepSeek API key and/or OpenRouter API key
-- Public Endpoint
+- OpenRouter API key
+- Docker and Docker Compose
+- Traefik (for reverse proxy)
 
-## Installation
+## Quick Start with Docker Compose
 
 1. Clone the repository
-2. Install dependencies:
-```bash
-go mod download
-```
-
-### Docker Installation
-
-1. Build the Docker image:
-```bash
-docker build -t cursor-deepseek .
-```
-
-2. Configure environment variables:
-   - Copy the example configuration:
+2. Configure environment:
    ```bash
    cp .env.example .env
    ```
-   - Edit `.env` and add your API key(s)
+   Edit `.env` and add your OpenRouter API key and preferred model
 
-3. Run the container:
-```bash
-docker run -p 9000:9000 --env-file .env cursor-deepseek
-```
+3. Start with Docker Compose:
+   ```bash
+   docker-compose up -d
+   ```
 
 ## Configuration
 
-The repository includes an `.env.example` file showing the required environment variables. To configure:
+The `.env` file controls your setup:
 
-1. Copy the example configuration:
 ```bash
-cp .env.example .env
-```
-
-2. Edit `.env` and add your API key(s):
-```bash
-# For DeepSeek (required for chat and coder models)
-DEEPSEEK_API_KEY=your_deepseek_api_key_here
-
-# For OpenRouter (required for openrouter model)
+# Required
 OPENROUTER_API_KEY=your_openrouter_api_key_here
+# Optional - defaults to anthropic/claude-3-opus-20240229
+OPENROUTER_MODEL=your_preferred_model
 ```
 
-Note: You can configure either one or both API keys depending on which models you plan to use.
+Available models can be found at [OpenRouter's model list](https://openrouter.ai/models).
 
 ## Usage
 
-Start the proxy server with one of the following commands:
+### Basic Usage
+
+Point Cursor to `http://your-proxy:9000/v1` (or `https://cursor-proxy.$YOURDOMAIN/v1`) as the OpenAI API endpoint and keep GTP-4o as model.
+The proxy will automatically:
+1. Translate Cursor's GPT-4o requests to your chosen model
+2. Handle all necessary format conversions
+3. Stream responses back to Cursor
+
+### Dynamic Model Switching
+
+Switch models without restarting using the API endpoint:
 
 ```bash
-# For DeepSeek Chat model (default)
-go run proxy.go -model chat
-
-# For DeepSeek Coder model
-go run proxy.go -model coder
-
-# For OpenRouter DeepSeek model
-go run proxy.go -model openrouter
+curl -X POST http://your-proxy:9000/switch-model \
+  -H "Content-Type: application/json" \
+  -d '{"model": "anthropic/claude-3-opus-20240229"}'
 ```
 
-The server will start on port 9000 by default.
+### Traefik Integration
 
-Use the proxy with your OpenAI API clients by setting the base URL to `http://your-public-endpoint:9000/v1`
+Update your docker-compose.yml to include Traefik labels:
 
-### Supported Models
+```yaml
+services:
+  cursor-proxy:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.cursor-proxy.rule=Host(`your-domain`)"
+      - "traefik.http.services.cursor-proxy.loadbalancer.server.port=9000"
+```
 
-- `gpt-4o` maps to:
-  - DeepSeek Chat model (`deepseek-chat`) when using `-model chat`
-  - DeepSeek Coder model (`deepseek-coder`) when using `-model coder`
-  - DeepSeek OpenRouter model (`deepseek/deepseek-chat`) when using `-model openrouter`
-
-### Supported Endpoints
+## Supported Endpoints
 
 - `/v1/chat/completions` - Chat completions endpoint
 - `/v1/models` - Models listing endpoint
-
-## Dependencies
-
-- `github.com/joho/godotenv` - Environment variable management
-- `golang.org/x/net` - HTTP/2 support
+- `/switch-model` - Dynamic model switching endpoint
 
 ## Security
 
-- The proxy includes CORS headers for cross-origin requests
-- API keys are required and validated against environment variables
-- Secure handling of request/response data
-- Strict API key validation for all requests
+- CORS headers for cross-origin requests
+- API key validation
+- Secure request/response handling
 - HTTPS support through HTTP/2
-- Environment variables are never committed to the repository
+- Environment variables protection
 
 ## License
 
