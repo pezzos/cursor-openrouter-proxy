@@ -68,7 +68,7 @@ The proxy will automatically:
 Switch models without restarting using the API endpoint:
 
 ```bash
-curl -X POST http://your-proxy:9000/switch-model \
+curl -X POST http://your-proxy:9000/v1/config \
   -H "Content-Type: application/json" \
   -d '{"model": "anthropic/claude-3-opus-20240229"}'
 ```
