@@ -909,14 +909,13 @@ func handleGetConfigRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleGetModelsRequest(w http.ResponseWriter) {
-	// /models requires authentication so manually create the request
+	// Manually create the request for the models endpoint for future header customization
 	req, err := http.NewRequest(http.MethodGet, openRouterEndpoint+"/models", nil)
 	if err != nil {
 		http.Error(w, "Error creating request", http.StatusInternalServerError)
 		return
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", activeConfig.apiKey))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := httpClient.Do(req)
