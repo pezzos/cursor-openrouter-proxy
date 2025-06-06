@@ -89,7 +89,9 @@ func putBuffer(buf *bytes.Buffer) {
 	}
 }
 
-func init() {
+// loadConfig initializes activeConfig using environment variables or a .env file.
+// It can be called by tests to reload configuration.
+func loadConfig() Config {
 	// Check environment variables first
 	openRouterAPIKey = os.Getenv("OPENROUTER_API_KEY")
 	defaultModel := os.Getenv("OPENROUTER_MODEL")
@@ -131,6 +133,11 @@ func init() {
 	}
 
 	log.Printf("Initialized Cursor-OpenRouter proxy with model: %s using endpoint: %s", activeConfig.model, activeConfig.endpoint)
+	return activeConfig
+}
+
+func init() {
+	loadConfig()
 }
 
 // Models response structure
@@ -278,42 +285,7 @@ func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile)
 
 	// Add health check endpoint
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		// Test OpenRouter connection
-		req, err := http.NewRequest("GET", openRouterEndpoint+"/models", nil)
-		if err != nil {
-			log.Printf("Error creating health check request: %v", err)
-			http.Error(w, "Error creating request", http.StatusInternalServerError)
-			return
-		}
-
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", activeConfig.apiKey))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("HTTP-Referer", "https://github.com/pezzos/cursor-proxy")
-		req.Header.Set("X-Title", "Cursor Proxy")
-		req.Header.Set("OpenAI-Organization", "cursor-proxy")
-
-		resp, err := httpClient.Do(req)
-		if err != nil {
-			log.Printf("Health check failed: %v", err)
-			http.Error(w, "Connection failed", http.StatusServiceUnavailable)
-			return
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			log.Printf("Health check failed with status %d: %s", resp.StatusCode, string(body))
-			http.Error(w, fmt.Sprintf("OpenRouter returned %d", resp.StatusCode), resp.StatusCode)
-			return
-		}
-
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{
-			"status":   "ok",
-			"endpoint": openRouterEndpoint,
-		})
-	})
+	http.HandleFunc("/health", healthHandler)
 
 	server := &http.Server{
 		Addr:    ":9000",
@@ -335,6 +307,44 @@ func enableCors(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization")
 	w.Header().Set("Access-Control-Expose-Headers", "Content-Length")
 	w.Header().Set("Access-Control-Allow-Credentials", "true")
+}
+
+// healthHandler provides a basic health check by querying the OpenRouter models endpoint.
+func healthHandler(w http.ResponseWriter, r *http.Request) {
+	// Test OpenRouter connection
+	req, err := http.NewRequest("GET", openRouterEndpoint+"/models", nil)
+	if err != nil {
+		log.Printf("Error creating health check request: %v", err)
+		http.Error(w, "Error creating request", http.StatusInternalServerError)
+		return
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", activeConfig.apiKey))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("HTTP-Referer", "https://github.com/pezzos/cursor-proxy")
+	req.Header.Set("X-Title", "Cursor Proxy")
+	req.Header.Set("OpenAI-Organization", "cursor-proxy")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		log.Printf("Health check failed: %v", err)
+		http.Error(w, "Connection failed", http.StatusServiceUnavailable)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		log.Printf("Health check failed with status %d: %s", resp.StatusCode, string(body))
+		http.Error(w, fmt.Sprintf("OpenRouter returned %d", resp.StatusCode), resp.StatusCode)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":   "ok",
+		"endpoint": openRouterEndpoint,
+	})
 }
 
 func maskAPIKey(key string) string {
