@@ -90,13 +90,22 @@ func putBuffer(buf *bytes.Buffer) {
 }
 
 func init() {
-	// Load .env file
-	if err := godotenv.Load(); err != nil {
-		log.Printf("Warning: .env file not found or error loading it: %v", err)
-	}
-
-	// Get API key
+	// Check environment variables first
 	openRouterAPIKey = os.Getenv("OPENROUTER_API_KEY")
+	defaultModel := os.Getenv("MODEL")
+
+	// If key or model is missing, try loading from .env file
+	if openRouterAPIKey == "" || defaultModel == "" {
+		if err := godotenv.Load(); err != nil {
+			log.Printf("Warning: .env file not found or error loading it: %v", err)
+		}
+		if openRouterAPIKey == "" {
+			openRouterAPIKey = os.Getenv("OPENROUTER_API_KEY")
+		}
+		if defaultModel == "" {
+			defaultModel = os.Getenv("MODEL")
+		}
+	}
 
 	// Ensure API key is provided and has correct format
 	if !strings.HasPrefix(openRouterAPIKey, "sk-or-") {
@@ -106,8 +115,7 @@ func init() {
 		log.Fatal("OPENROUTER_API_KEY seems too short to be valid")
 	}
 
-	// Get default model from env or use fallback
-	defaultModel := os.Getenv("MODEL")
+	// Validate or fallback to default model
 	if defaultModel == "" {
 		defaultModel = openRouterModel
 	} else if !strings.Contains(defaultModel, "/") {
