@@ -92,7 +92,7 @@ func putBuffer(buf *bytes.Buffer) {
 func init() {
 	// Check environment variables first
 	openRouterAPIKey = os.Getenv("OPENROUTER_API_KEY")
-	defaultModel := os.Getenv("MODEL")
+	defaultModel := os.Getenv("OPENROUTER_MODEL")
 
 	// If key or model is missing, try loading from .env file
 	if openRouterAPIKey == "" || defaultModel == "" {
@@ -103,7 +103,7 @@ func init() {
 			openRouterAPIKey = os.Getenv("OPENROUTER_API_KEY")
 		}
 		if defaultModel == "" {
-			defaultModel = os.Getenv("MODEL")
+			defaultModel = os.Getenv("OPENROUTER_MODEL")
 		}
 	}
 
