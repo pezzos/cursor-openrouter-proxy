@@ -14,16 +14,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/joho/godotenv"
-	"golang.org/x/net/http2"
-	"github.com/klauspost/compress/gzip"
 	"github.com/andybalholm/brotli"
+	"github.com/joho/godotenv"
+	"github.com/klauspost/compress/gzip"
+	"golang.org/x/net/http2"
 )
 
 const (
 	openRouterEndpoint = "https://openrouter.ai/api/v1"
 	openRouterModel    = "openai/gpt-4o"
-	cursorMockedModel        = "gpt-4o"
+	cursorMockedModel  = "gpt-4o"
 )
 
 var (
@@ -909,7 +909,16 @@ func handleGetConfigRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleGetModelsRequest(w http.ResponseWriter) {
-	resp, err := httpClient.Get(openRouterEndpoint + "/models")
+	// Manually create the request for the models endpoint for future header customization
+	req, err := http.NewRequest(http.MethodGet, openRouterEndpoint+"/models", nil)
+	if err != nil {
+		http.Error(w, "Error creating request", http.StatusInternalServerError)
+		return
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		http.Error(w, "Error fetching models", http.StatusInternalServerError)
 		return
