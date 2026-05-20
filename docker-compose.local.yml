@@ -1,0 +1,12 @@
+services:
+  cursor-proxy:
+    build:
+      context: .
+    container_name: cursor-proxy-local
+    env_file: .env
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL}
+    ports:
+      - "127.0.0.1:9000:9000"
+    restart: unless-stopped

@@ -3,13 +3,12 @@
 # test_proxy.sh
 echo "Testing Cursor Proxy..."
 
-# Load the domain from the .env file
-DOMAIN=$(grep -oP 'DOMAIN=\K.*' .env)
+PROXY_URL="${PROXY_URL:-http://127.0.0.1:9000}"
 
 # Use a fake API key because it's rewritten by the proxy
-response=$(curl -s -w "\n%{http_code}" https://cursor-proxy.$DOMAIN/v1/chat/completions \
+response=$(curl -s -w "\n%{http_code}" "$PROXY_URL/v1/chat/completions" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-or-v1-1234567890" \
+  -H "Authorization: Bearer local-test-key" \
   -d '{
     "messages": [
       {
@@ -33,8 +32,8 @@ echo -e "\nResponse body:"
 echo "$body" | jq '.' 2>/dev/null || echo "$body"
 
 if [ "$http_code" -ne 200 ]; then
-    echo -e "\n❌ Test failed!"
+    echo -e "\nTest failed!"
     exit 1
 else
-    echo -e "\n✅ Test successful!"
+    echo -e "\nTest successful!"
 fi
