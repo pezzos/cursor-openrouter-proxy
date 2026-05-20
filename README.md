@@ -2,6 +2,13 @@
 
 A high-performance HTTP/2-enabled proxy server that enables Cursor IDE (including Composer) to use any LLM available through OpenRouter. By making Cursor believe it's talking to GPT-4, this proxy translates OpenAI-compatible API requests to work with any model available on OpenRouter, allowing seamless integration with Cursor's features.
 
+## Related Article
+
+Project Pezzos keeps the context for this experiment in
+[Cursor OpenRouter Proxy](https://projectpezzoscom.pages.dev/journal/cursor-openrouter-proxy/).
+The article explains why this proxy was built, what it showed about Cursor payloads,
+and where the Cursor/DeepSeek integration stayed fragile.
+
 ## Primary Use Case
 
 This proxy enables Cursor IDE users to leverage any LLM available on OpenRouter through Cursor's interface, including the Composer. Simply point Cursor to this proxy with any key, and it will handle all the necessary translations to make your chosen model work as if it were GPT-4.
