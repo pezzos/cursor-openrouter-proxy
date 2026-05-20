@@ -28,6 +28,10 @@
 | Proxy routed request to OpenRouter | passed | Model rewrite and forwarding worked. |
 | Payload inspection | useful | Cursor prompts/options became observable. |
 | DeepSeek answer usable as Cursor edit | inconsistent | Some responses stayed as chat text instead of becoming an applicable edit. |
+| `go test ./...` | passed | No Go test files, package compiled for test. |
+| `go build ./...` | passed | Local binary build completed. |
+| Local Docker Compose path | passed | `docker compose -f docker-compose.local.yml up -d --build` started the proxy on `127.0.0.1:9000`. |
+| `test_proxy.sh` against local Docker proxy | passed | Returned HTTP `200` with a short assistant response after the fake incoming key was changed to an OpenAI-shaped `sk-*` value. |
 
 ## What This Shows
 
@@ -35,6 +39,8 @@
 - A proxy is useful for seeing what Cursor actually sends to a model.
 - API compatibility is not enough when Cursor expects an implicit response format or
   behavior.
+- The local repo path is runnable with Docker after setting `OPENROUTER_API_KEY` and
+  `OPENROUTER_MODEL`.
 
 ## What This Does Not Prove
 
@@ -42,6 +48,8 @@
 - It does not prove compatibility with current Cursor versions.
 - It does not prove safe handling for private code or sensitive prompts.
 - It does not prove production readiness.
+- It does not prove that Cursor can apply model responses as file edits; the local test
+  only validates the chat completion path through the proxy.
 
 ## Decision
 
