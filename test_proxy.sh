@@ -5,10 +5,10 @@ echo "Testing Cursor Proxy..."
 
 PROXY_URL="${PROXY_URL:-http://127.0.0.1:9000}"
 
-# Use a fake API key because it's rewritten by the proxy
+# Use a fake OpenAI-shaped API key because the proxy only checks the incoming format.
 response=$(curl -s -w "\n%{http_code}" "$PROXY_URL/v1/chat/completions" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer local-test-key" \
+  -H "Authorization: Bearer sk-local-test-key" \
   -d '{
     "messages": [
       {
